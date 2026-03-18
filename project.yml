@@ -1,0 +1,34 @@
+name: Hush
+options:
+  bundleIdPrefix: com.bastian
+  deploymentTarget:
+    macOS: "14.2"
+  xcodeVersion: "16.0"
+  minimumXcodeGenVersion: "2.38.0"
+
+targets:
+  Hush:
+    type: application
+    platform: macOS
+    sources:
+      - Hush
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.bastian.Hush
+        INFOPLIST_FILE: Hush/Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: false
+        SWIFT_VERSION: "5.10"
+        MACOSX_DEPLOYMENT_TARGET: "14.2"
+        ENABLE_APP_SANDBOX: false
+        ENABLE_HARDENED_RUNTIME: true
+        CODE_SIGN_ENTITLEMENTS: Hush/Resources/Hush.entitlements
+        CODE_SIGN_IDENTITY: "-"
+        PRODUCT_NAME: Hush
+      configs:
+        Release:
+          # For notarized distribution, change CODE_SIGN_IDENTITY to your Developer ID:
+          # CODE_SIGN_IDENTITY: "Developer ID Application"
+          # DEVELOPMENT_TEAM: "YOUR_TEAM_ID"
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
+    dependencies:
+      - sdk: CoreAudio.framework
