@@ -1,7 +1,10 @@
 import AppKit
 import CoreAudio
 
-struct AudioProcess: Identifiable, Hashable {
+/// `@unchecked Sendable` because `NSImage` is not formally `Sendable`,
+/// but instances here are only read after creation, and the struct is
+/// exclusively used from `@MainActor` context.
+struct AudioProcess: Identifiable, Hashable, @unchecked Sendable {
     let id: String              // bundleID, or "pid:<N>" for unbundled processes
     let objectIDs: [AudioObjectID]
     let pid: pid_t

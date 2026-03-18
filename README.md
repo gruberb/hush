@@ -27,7 +27,6 @@ Hush is a lightweight menu bar utility that lets you mute individual apps — so
 - **Output device switching** - mutes persist when you switch headphones/speakers
 - **Launch at Login** - optional, via system Login Items
 - **Menu bar native** - lives in the menu bar, no Dock icon
-- **~500 lines of Swift** - small, auditable codebase
 
 ## Requirements
 

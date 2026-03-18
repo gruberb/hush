@@ -40,7 +40,7 @@ struct AudioProcessRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(isHovering ? Color.primary.opacity(0.06) : Color.clear)
-        .cornerRadius(4)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
         .contentShape(Rectangle())
         .onTapGesture(perform: onToggle)
         .onHover { isHovering = $0 }

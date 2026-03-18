@@ -1,6 +1,10 @@
 import CoreAudio
 import AppKit
+import os
 
+private let logger = Logger(subsystem: "com.bastian.Hush", category: "ProcessMonitor")
+
+@MainActor
 final class AudioProcessMonitor {
     var onChange: (([AudioProcess]) -> Void)?
 
@@ -12,15 +16,32 @@ final class AudioProcessMonitor {
     )
     private var pollTimer: Timer?
 
-    deinit { stopListening() }
+    deinit {
+        pollTimer?.invalidate()
+        if let block = listenerBlock {
+            var addr = processListAddress
+            AudioObjectRemovePropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject),
+                &addr,
+                .main,
+                block
+            )
+        }
+    }
 
     private static let ownBundleID = Bundle.main.bundleIdentifier
 
     func enumerateProcesses() -> [AudioProcess] {
-        guard let objectIDs: [AudioObjectID] = try? caPropertyArray(
-            from: AudioObjectID(kAudioObjectSystemObject),
-            address: processListAddress
-        ) else { return [] }
+        let objectIDs: [AudioObjectID]
+        do {
+            objectIDs = try CoreAudioHelper.propertyArray(
+                from: AudioObjectID(kAudioObjectSystemObject),
+                address: processListAddress
+            )
+        } catch {
+            logger.error("Failed to enumerate audio processes: \(error.localizedDescription)")
+            return []
+        }
 
         struct Info {
             var objectIDs: [AudioObjectID]
@@ -39,21 +60,21 @@ final class AudioProcessMonitor {
                 mScope: kAudioObjectPropertyScopeGlobal,
                 mElement: kAudioObjectPropertyElementMain
             )
-            guard let pid: pid_t = try? caPropertyData(from: oid, address: pidAddr) else { continue }
+            guard let pid: pid_t = try? CoreAudioHelper.propertyData(from: oid, address: pidAddr) else { continue }
 
             let runAddr = AudioObjectPropertyAddress(
                 mSelector: kAudioProcessPropertyIsRunningOutput,
                 mScope: kAudioObjectPropertyScopeGlobal,
                 mElement: kAudioObjectPropertyElementMain
             )
-            let isRunning: UInt32 = (try? caPropertyData(from: oid, address: runAddr)) ?? 0
+            let isRunning: UInt32 = (try? CoreAudioHelper.propertyData(from: oid, address: runAddr)) ?? 0
 
             let bidAddr = AudioObjectPropertyAddress(
                 mSelector: kAudioProcessPropertyBundleID,
                 mScope: kAudioObjectPropertyScopeGlobal,
                 mElement: kAudioObjectPropertyElementMain
             )
-            let bundleID = try? caStringProperty(from: oid, address: bidAddr)
+            let bundleID = try? CoreAudioHelper.stringProperty(from: oid, address: bidAddr)
 
             // Skip our own process
             if bundleID == Self.ownBundleID { continue }
@@ -98,7 +119,9 @@ final class AudioProcessMonitor {
 
     func startListening() {
         let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            self?.fireUpdate()
+            Task { @MainActor [weak self] in
+                self?.fireUpdate()
+            }
         }
         listenerBlock = block
         AudioObjectAddPropertyListenerBlock(
@@ -110,7 +133,9 @@ final class AudioProcessMonitor {
 
         // Poll every 2s to catch isRunningOutput changes (no HAL notification for those)
         pollTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            self?.fireUpdate()
+            Task { @MainActor [weak self] in
+                self?.fireUpdate()
+            }
         }
     }
 

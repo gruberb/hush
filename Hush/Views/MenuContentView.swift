@@ -80,10 +80,10 @@ struct MenuContentView: View {
         if let error = viewModel.error {
             Divider()
             VStack(alignment: .leading, spacing: 4) {
-                Text(error)
+                Text(error.message)
                     .font(.caption)
                     .foregroundStyle(.red)
-                if error.contains("permission") || error.contains("Permission") {
+                if case .permissionDenied = error {
                     Button("Open System Settings") {
                         viewModel.openAudioPrivacySettings()
                     }
@@ -99,18 +99,11 @@ struct MenuContentView: View {
 
     private var footer: some View {
         VStack(spacing: 0) {
-            Button {
-                viewModel.toggleLaunchAtLogin()
-            } label: {
-                HStack {
-                    Image(systemName: viewModel.launchAtLogin ? "checkmark.square.fill" : "square")
-                        .foregroundStyle(viewModel.launchAtLogin ? .blue : .secondary)
-                    Text("Launch at Login")
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+            Toggle("Launch at Login", isOn: Binding(
+                get: { viewModel.launchAtLogin },
+                set: { _ in viewModel.toggleLaunchAtLogin() }
+            ))
+            .toggleStyle(.checkbox)
             .font(.caption)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)

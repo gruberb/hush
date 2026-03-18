@@ -37,71 +37,73 @@ enum CoreAudioError: LocalizedError {
     ]
 }
 
-func caPropertyData<T>(from objectID: AudioObjectID, address: AudioObjectPropertyAddress) throws -> T {
-    var address = address
-    var size: UInt32 = 0
+enum CoreAudioHelper {
+    static func propertyData<T>(from objectID: AudioObjectID, address: AudioObjectPropertyAddress) throws -> T {
+        var address = address
+        var size: UInt32 = 0
 
-    var status = AudioObjectGetPropertyDataSize(objectID, &address, 0, nil, &size)
-    guard status == noErr else { throw CoreAudioError.osStatus(status) }
+        var status = AudioObjectGetPropertyDataSize(objectID, &address, 0, nil, &size)
+        guard status == noErr else { throw CoreAudioError.osStatus(status) }
 
-    let data = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<T>.alignment)
-    defer { data.deallocate() }
+        let data = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<T>.alignment)
+        defer { data.deallocate() }
 
-    status = AudioObjectGetPropertyData(objectID, &address, 0, nil, &size, data)
-    guard status == noErr else { throw CoreAudioError.osStatus(status) }
+        status = AudioObjectGetPropertyData(objectID, &address, 0, nil, &size, data)
+        guard status == noErr else { throw CoreAudioError.osStatus(status) }
 
-    return data.load(as: T.self)
-}
+        return data.load(as: T.self)
+    }
 
-func caPropertyArray<T>(from objectID: AudioObjectID, address: AudioObjectPropertyAddress) throws -> [T] {
-    var address = address
-    var size: UInt32 = 0
+    static func propertyArray<T>(from objectID: AudioObjectID, address: AudioObjectPropertyAddress) throws -> [T] {
+        var address = address
+        var size: UInt32 = 0
 
-    var status = AudioObjectGetPropertyDataSize(objectID, &address, 0, nil, &size)
-    guard status == noErr else { throw CoreAudioError.osStatus(status) }
+        var status = AudioObjectGetPropertyDataSize(objectID, &address, 0, nil, &size)
+        guard status == noErr else { throw CoreAudioError.osStatus(status) }
 
-    let count = Int(size) / MemoryLayout<T>.stride
-    guard count > 0 else { return [] }
+        let count = Int(size) / MemoryLayout<T>.stride
+        guard count > 0 else { return [] }
 
-    let data = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<T>.alignment)
-    defer { data.deallocate() }
+        let data = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<T>.alignment)
+        defer { data.deallocate() }
 
-    status = AudioObjectGetPropertyData(objectID, &address, 0, nil, &size, data)
-    guard status == noErr else { throw CoreAudioError.osStatus(status) }
+        status = AudioObjectGetPropertyData(objectID, &address, 0, nil, &size, data)
+        guard status == noErr else { throw CoreAudioError.osStatus(status) }
 
-    let buffer = data.bindMemory(to: T.self, capacity: count)
-    return Array(UnsafeBufferPointer(start: buffer, count: count))
-}
+        let buffer = data.bindMemory(to: T.self, capacity: count)
+        return Array(UnsafeBufferPointer(start: buffer, count: count))
+    }
 
-func caStringProperty(from objectID: AudioObjectID, address: AudioObjectPropertyAddress) throws -> String {
-    var address = address
-    var size = UInt32(MemoryLayout<Unmanaged<CFString>>.size)
+    static func stringProperty(from objectID: AudioObjectID, address: AudioObjectPropertyAddress) throws -> String {
+        var address = address
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>>.size)
 
-    let ptr = UnsafeMutablePointer<Unmanaged<CFString>>.allocate(capacity: 1)
-    defer { ptr.deallocate() }
+        let ptr = UnsafeMutablePointer<Unmanaged<CFString>>.allocate(capacity: 1)
+        defer { ptr.deallocate() }
 
-    let status = AudioObjectGetPropertyData(objectID, &address, 0, nil, &size, ptr)
-    guard status == noErr else { throw CoreAudioError.osStatus(status) }
+        let status = AudioObjectGetPropertyData(objectID, &address, 0, nil, &size, ptr)
+        guard status == noErr else { throw CoreAudioError.osStatus(status) }
 
-    // AudioObjectGetPropertyData follows the "Get Rule" — caller does NOT own the reference
-    return ptr.pointee.takeUnretainedValue() as String
-}
+        // AudioObjectGetPropertyData follows the "Get Rule" — caller does NOT own the reference
+        return ptr.pointee.takeUnretainedValue() as String
+    }
 
-func caDefaultOutputDeviceUID() throws -> String {
-    let deviceID: AudioObjectID = try caPropertyData(
-        from: AudioObjectID(kAudioObjectSystemObject),
-        address: AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
+    static func defaultOutputDeviceUID() throws -> String {
+        let deviceID: AudioObjectID = try propertyData(
+            from: AudioObjectID(kAudioObjectSystemObject),
+            address: AudioObjectPropertyAddress(
+                mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
         )
-    )
-    return try caStringProperty(
-        from: deviceID,
-        address: AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyDeviceUID,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
+        return try stringProperty(
+            from: deviceID,
+            address: AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyDeviceUID,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
         )
-    )
+    }
 }

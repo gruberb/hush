@@ -6,12 +6,27 @@ import os
 
 private let logger = Logger(subsystem: "com.bastian.Hush", category: "ViewModel")
 
+enum HushError {
+    case permissionDenied
+    case muteFailed(processName: String, detail: String)
+
+    var message: String {
+        switch self {
+        case .permissionDenied:
+            return "Hush needs Screen & System Audio Recording permission. Open System Settings > Privacy & Security to grant access."
+        case .muteFailed(let name, let detail):
+            return "Failed to mute \(name): \(detail)"
+        }
+    }
+}
+
 @Observable
 @MainActor
 final class AppListViewModel {
     var processes: [AudioProcess] = []
     var mutedProcessIDs: Set<String> = []
-    var error: String?
+    var error: HushError?
+    var launchAtLogin = false
 
     var anyMuted: Bool { !mutedProcessIDs.isEmpty }
 
@@ -73,9 +88,9 @@ final class AppListViewModel {
                 error = nil
             } catch let err {
                 if let caErr = err as? CoreAudioError, caErr.isPermissionError {
-                    self.error = "Hush needs Screen & System Audio Recording permission. Open System Settings > Privacy & Security to grant access."
+                    self.error = .permissionDenied
                 } else {
-                    self.error = "Failed to mute \(process.name): \(err.localizedDescription)"
+                    self.error = .muteFailed(processName: process.name, detail: err.localizedDescription)
                 }
                 logger.error("Mute failed for \(process.name): \(err.localizedDescription)")
             }
@@ -102,8 +117,6 @@ final class AppListViewModel {
         }
     }
 
-    var launchAtLogin = false
-
     func toggleLaunchAtLogin() {
         let newValue = !launchAtLogin
         do {
@@ -123,22 +136,27 @@ final class AppListViewModel {
     private func handleProcessUpdate(_ activeProcesses: [AudioProcess]) {
         var merged = activeProcesses
 
-        // Keep muted processes visible even when they pause audio output
+        // Keep muted processes visible even when they pause audio output.
+        // Collect exited IDs first, then clean up in a second pass to avoid
+        // mutating mutedProcessCache while iterating over it.
+        let exitedIDs = mutedProcessCache.keys.filter { id in
+            !activeProcesses.contains(where: { $0.id == id }) &&
+            kill(mutedProcessCache[id]!.pid, 0) != 0
+        }
+        for id in exitedIDs {
+            logger.info("Muted process exited: \(self.mutedProcessCache[id]?.name ?? id)")
+            tapManager.unmute(processID: id)
+            mutedProcessIDs.remove(id)
+            mutedObjectIDs.removeValue(forKey: id)
+            mutedProcessCache.removeValue(forKey: id)
+        }
+
+        // Append still-alive muted processes that stopped outputting audio
         for (id, cached) in mutedProcessCache {
             if !activeProcesses.contains(where: { $0.id == id }) {
-                if kill(cached.pid, 0) == 0 {
-                    // Process is alive but not outputting audio — keep it visible
-                    var copy = cached
-                    copy.isRunningOutput = false
-                    merged.append(copy)
-                } else {
-                    // Process has exited — clean up the tap
-                    logger.info("Muted process exited: \(cached.name)")
-                    tapManager.unmute(processID: id)
-                    mutedProcessIDs.remove(id)
-                    mutedObjectIDs.removeValue(forKey: id)
-                    mutedProcessCache.removeValue(forKey: id)
-                }
+                var copy = cached
+                copy.isRunningOutput = false
+                merged.append(copy)
             }
         }
 
@@ -187,19 +205,25 @@ final class AppListViewModel {
             let saved = self.mutedObjectIDs
 
             self.tapManager.teardownAll()
-            self.mutedProcessIDs.removeAll()
-            self.mutedObjectIDs.removeAll()
+
+            // Collect new state into locals, then assign once to avoid
+            // a UI flicker where everything briefly appears unmuted.
+            var newMutedIDs: Set<String> = []
+            var newObjectIDs: [String: [AudioObjectID]] = [:]
 
             for (processID, objectIDs) in saved {
                 do {
                     try self.tapManager.mute(processID: processID, objectIDs: objectIDs)
-                    self.mutedProcessIDs.insert(processID)
-                    self.mutedObjectIDs[processID] = objectIDs
+                    newMutedIDs.insert(processID)
+                    newObjectIDs[processID] = objectIDs
                 } catch {
                     logger.error("Re-mute failed for \(processID): \(error.localizedDescription)")
                     self.mutedProcessCache.removeValue(forKey: processID)
                 }
             }
+
+            self.mutedProcessIDs = newMutedIDs
+            self.mutedObjectIDs = newObjectIDs
         }
     }
 }

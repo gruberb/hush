@@ -7,7 +7,7 @@ private let logger = Logger(subsystem: "com.bastian.Hush", category: "AudioTap")
 struct TapSession {
     let tapObjectID: AudioObjectID
     let aggregateDeviceID: AudioObjectID
-    let ioProcID: AudioDeviceIOProcID?
+    let ioProcID: AudioDeviceIOProcID
 }
 
 @MainActor
@@ -35,13 +35,15 @@ final class AudioTapManager {
 
         // 3. Get default output device UID
         let outputUID: String
-        do { outputUID = try caDefaultOutputDeviceUID() }
+        do { outputUID = try CoreAudioHelper.defaultOutputDeviceUID() }
         catch {
             _ = AudioHardwareDestroyProcessTap(tapID)
             throw error
         }
 
         // 4. Build aggregate device containing the tap + default output
+        // Keys sourced from Apple's WWDC 2024 sample code for Audio Taps.
+        // These are not in public headers — see AudioHardwareCreateAggregateDevice docs.
         let aggDesc: [String: Any] = [
             "uid":  "com.bastian.Hush.agg.\(UUID().uuidString)",
             "name": "Hush Tap",
@@ -103,10 +105,8 @@ final class AudioTapManager {
     // MARK: - Private
 
     private func teardown(_ session: TapSession) {
-        if let procID = session.ioProcID {
-            _ = AudioDeviceStop(session.aggregateDeviceID, procID)
-            _ = AudioDeviceDestroyIOProcID(session.aggregateDeviceID, procID)
-        }
+        _ = AudioDeviceStop(session.aggregateDeviceID, session.ioProcID)
+        _ = AudioDeviceDestroyIOProcID(session.aggregateDeviceID, session.ioProcID)
         _ = AudioHardwareDestroyAggregateDevice(session.aggregateDeviceID)
         _ = AudioHardwareDestroyProcessTap(session.tapObjectID)
     }
