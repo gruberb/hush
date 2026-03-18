@@ -11,7 +11,11 @@ targets:
     type: application
     platform: macOS
     sources:
-      - Hush
+      - path: Hush
+        excludes:
+          - "Resources/Assets.xcassets"
+      - path: Hush/Resources/Assets.xcassets
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bastian.Hush
@@ -24,6 +28,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Hush/Resources/Hush.entitlements
         CODE_SIGN_IDENTITY: "-"
         PRODUCT_NAME: Hush
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
       configs:
         Release:
           # For notarized distribution, change CODE_SIGN_IDENTITY to your Developer ID:

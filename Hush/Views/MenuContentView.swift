@@ -1,5 +1,4 @@
 import SwiftUI
-import ServiceManagement
 
 struct MenuContentView: View {
     var viewModel: AppListViewModel
@@ -100,11 +99,18 @@ struct MenuContentView: View {
 
     private var footer: some View {
         VStack(spacing: 0) {
-            Toggle("Launch at Login", isOn: Binding(
-                get: { SMAppService.mainApp.status == .enabled },
-                set: { viewModel.setLaunchAtLogin($0) }
-            ))
-            .toggleStyle(.checkbox)
+            Button {
+                viewModel.toggleLaunchAtLogin()
+            } label: {
+                HStack {
+                    Image(systemName: viewModel.launchAtLogin ? "checkmark.square.fill" : "square")
+                        .foregroundStyle(viewModel.launchAtLogin ? .blue : .secondary)
+                    Text("Launch at Login")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
             .font(.caption)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)

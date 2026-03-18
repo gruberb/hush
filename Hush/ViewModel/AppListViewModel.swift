@@ -29,6 +29,7 @@ final class AppListViewModel {
     private var deviceChangeTask: Task<Void, Never>?
 
     init() {
+        launchAtLogin = SMAppService.mainApp.status == .enabled
         processes = monitor.enumerateProcesses()
 
         monitor.onChange = { [weak self] processes in
@@ -38,6 +39,20 @@ final class AppListViewModel {
         }
         monitor.startListening()
         startDeviceListener()
+        requestAudioTapPermission()
+    }
+
+    /// Triggers the TCC "Screen & System Audio Recording" prompt at launch
+    /// by creating and immediately destroying a dummy process tap.
+    private func requestAudioTapPermission() {
+        let desc = CATapDescription(__stereoGlobalTapButExcludeProcesses: [])
+        desc.muteBehavior = .unmuted
+        desc.isPrivate = true
+        var tapID: AudioObjectID = kAudioObjectUnknown
+        let status = AudioHardwareCreateProcessTap(desc, &tapID)
+        if status == noErr {
+            AudioHardwareDestroyProcessTap(tapID)
+        }
     }
 
     // MARK: - Actions
@@ -87,17 +102,17 @@ final class AppListViewModel {
         }
     }
 
-    var launchAtLoginEnabled: Bool {
-        SMAppService.mainApp.status == .enabled
-    }
+    var launchAtLogin = false
 
-    func setLaunchAtLogin(_ enabled: Bool) {
+    func toggleLaunchAtLogin() {
+        let newValue = !launchAtLogin
         do {
-            if enabled {
+            if newValue {
                 try SMAppService.mainApp.register()
             } else {
                 try SMAppService.mainApp.unregister()
             }
+            launchAtLogin = newValue
         } catch {
             logger.error("Launch at login failed: \(error.localizedDescription)")
         }
