@@ -26,14 +26,12 @@ targets:
         ENABLE_APP_SANDBOX: true
         ENABLE_HARDENED_RUNTIME: true
         CODE_SIGN_ENTITLEMENTS: Hush/Resources/Hush.entitlements
-        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: "5A4DE87J22"
+        CODE_SIGN_STYLE: Automatic
         PRODUCT_NAME: Hush
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
       configs:
         Release:
-          # For notarized distribution, change CODE_SIGN_IDENTITY to your Developer ID:
-          # CODE_SIGN_IDENTITY: "Developer ID Application"
-          # DEVELOPMENT_TEAM: "YOUR_TEAM_ID"
           SWIFT_OPTIMIZATION_LEVEL: "-O"
     dependencies:
       - sdk: CoreAudio.framework
