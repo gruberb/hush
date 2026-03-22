@@ -16,19 +16,6 @@ final class AudioProcessMonitor {
     )
     private var pollTimer: Timer?
 
-    deinit {
-        pollTimer?.invalidate()
-        if let block = listenerBlock {
-            var addr = processListAddress
-            AudioObjectRemovePropertyListenerBlock(
-                AudioObjectID(kAudioObjectSystemObject),
-                &addr,
-                .main,
-                block
-            )
-        }
-    }
-
     private static let ownBundleID = Bundle.main.bundleIdentifier
 
     func enumerateProcesses() -> [AudioProcess] {
@@ -114,7 +101,6 @@ final class AudioProcessMonitor {
                     isRunningOutput: info.isRunningOutput
                 )
             }
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     func startListening() {

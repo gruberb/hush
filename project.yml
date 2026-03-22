@@ -23,7 +23,7 @@ targets:
         GENERATE_INFOPLIST_FILE: false
         SWIFT_VERSION: "5.10"
         MACOSX_DEPLOYMENT_TARGET: "14.2"
-        ENABLE_APP_SANDBOX: false
+        ENABLE_APP_SANDBOX: true
         ENABLE_HARDENED_RUNTIME: true
         CODE_SIGN_ENTITLEMENTS: Hush/Resources/Hush.entitlements
         CODE_SIGN_IDENTITY: "-"

@@ -6,7 +6,7 @@ import os
 
 private let logger = Logger(subsystem: "com.bastian.Hush", category: "ViewModel")
 
-enum HushError {
+enum HushError: Error {
     case permissionDenied
     case muteFailed(processName: String, detail: String)
 
@@ -24,16 +24,18 @@ enum HushError {
 @MainActor
 final class AppListViewModel {
     var processes: [AudioProcess] = []
-    var mutedProcessIDs: Set<String> = []
+    var processVolumes: [String: Float] = [:]
     var error: HushError?
     var launchAtLogin = false
 
-    var anyMuted: Bool { !mutedProcessIDs.isEmpty }
+    var anyAdjusted: Bool { !processVolumes.isEmpty }
+    var anyMuted: Bool { processVolumes.values.contains { $0 <= 0 } }
 
     private let monitor = AudioProcessMonitor()
     private let tapManager = AudioTapManager()
-    private var mutedObjectIDs: [String: [AudioObjectID]] = [:]
-    private var mutedProcessCache: [String: AudioProcess] = [:]
+    private var tappedObjectIDs: [String: [AudioObjectID]] = [:]
+    private var tappedProcessCache: [String: AudioProcess] = [:]
+    private var previousVolumes: [String: Float] = [:]
 
     private var deviceListenerBlock: AudioObjectPropertyListenerBlock?
     private var deviceAddress = AudioObjectPropertyAddress(
@@ -57,34 +59,39 @@ final class AppListViewModel {
         requestAudioTapPermission()
     }
 
-    /// Triggers the TCC "Screen & System Audio Recording" prompt at launch
-    /// by creating and immediately destroying a dummy process tap.
-    private func requestAudioTapPermission() {
-        let desc = CATapDescription(__stereoGlobalTapButExcludeProcesses: [])
-        desc.muteBehavior = .unmuted
-        desc.isPrivate = true
-        var tapID: AudioObjectID = kAudioObjectUnknown
-        let status = AudioHardwareCreateProcessTap(desc, &tapID)
-        if status == noErr {
-            AudioHardwareDestroyProcessTap(tapID)
-        }
+    func volume(for processID: String) -> Float {
+        processVolumes[processID] ?? 1.0
     }
 
     // MARK: - Actions
 
     func toggleMute(for process: AudioProcess) {
-        if mutedProcessIDs.contains(process.id) {
-            tapManager.unmute(processID: process.id)
-            mutedProcessIDs.remove(process.id)
-            mutedObjectIDs.removeValue(forKey: process.id)
-            mutedProcessCache.removeValue(forKey: process.id)
+        let current = volume(for: process.id)
+        if current > 0 {
+            previousVolumes[process.id] = current
+            setVolume(for: process, to: 0)
+        } else {
+            let restored = previousVolumes.removeValue(forKey: process.id) ?? 1.0
+            setVolume(for: process, to: restored)
+        }
+    }
+
+    func setVolume(for process: AudioProcess, to volume: Float) {
+        let clamped = min(max(volume, 0), 1)
+
+        if clamped >= 1.0 {
+            tapManager.removeTap(processID: process.id)
+            processVolumes.removeValue(forKey: process.id)
+            tappedObjectIDs.removeValue(forKey: process.id)
+            tappedProcessCache.removeValue(forKey: process.id)
+            previousVolumes.removeValue(forKey: process.id)
             error = nil
         } else {
             do {
-                try tapManager.mute(processID: process.id, objectIDs: process.objectIDs)
-                mutedProcessIDs.insert(process.id)
-                mutedObjectIDs[process.id] = process.objectIDs
-                mutedProcessCache[process.id] = process
+                try tapManager.setVolume(processID: process.id, objectIDs: process.objectIDs, volume: Float32(clamped))
+                processVolumes[process.id] = clamped
+                tappedObjectIDs[process.id] = process.objectIDs
+                tappedProcessCache[process.id] = process
                 error = nil
             } catch let err {
                 if let caErr = err as? CoreAudioError, caErr.isPermissionError {
@@ -92,21 +99,22 @@ final class AppListViewModel {
                 } else {
                     self.error = .muteFailed(processName: process.name, detail: err.localizedDescription)
                 }
-                logger.error("Mute failed for \(process.name): \(err.localizedDescription)")
+                logger.error("Volume change failed for \(process.name): \(err.localizedDescription)")
             }
         }
     }
 
-    func unmuteAll() {
+    func resetAll() {
         tapManager.teardownAll()
-        mutedProcessIDs.removeAll()
-        mutedObjectIDs.removeAll()
-        mutedProcessCache.removeAll()
+        processVolumes.removeAll()
+        tappedObjectIDs.removeAll()
+        tappedProcessCache.removeAll()
+        previousVolumes.removeAll()
         error = nil
     }
 
     func teardown() {
-        unmuteAll()
+        resetAll()
         monitor.stopListening()
         stopDeviceListener()
     }
@@ -133,26 +141,39 @@ final class AppListViewModel {
 
     // MARK: - Private
 
+    private func requestAudioTapPermission() {
+        let desc = CATapDescription(__stereoGlobalTapButExcludeProcesses: [])
+        desc.muteBehavior = .unmuted
+        desc.isPrivate = true
+        var tapID: AudioObjectID = kAudioObjectUnknown
+        let status = AudioHardwareCreateProcessTap(desc, &tapID)
+        if status == noErr {
+            AudioHardwareDestroyProcessTap(tapID)
+        }
+    }
+
     private func handleProcessUpdate(_ activeProcesses: [AudioProcess]) {
         var merged = activeProcesses
 
-        // Keep muted processes visible even when they pause audio output.
+        // Keep tapped processes visible even when they pause audio output.
         // Collect exited IDs first, then clean up in a second pass to avoid
-        // mutating mutedProcessCache while iterating over it.
-        let exitedIDs = mutedProcessCache.keys.filter { id in
-            !activeProcesses.contains(where: { $0.id == id }) &&
-            kill(mutedProcessCache[id]!.pid, 0) != 0
+        // mutating tappedProcessCache while iterating over it.
+        let exitedIDs = tappedProcessCache.keys.filter { id in
+            guard let cached = tappedProcessCache[id] else { return false }
+            return !activeProcesses.contains(where: { $0.id == id }) &&
+                kill(cached.pid, 0) != 0
         }
         for id in exitedIDs {
-            logger.info("Muted process exited: \(self.mutedProcessCache[id]?.name ?? id)")
-            tapManager.unmute(processID: id)
-            mutedProcessIDs.remove(id)
-            mutedObjectIDs.removeValue(forKey: id)
-            mutedProcessCache.removeValue(forKey: id)
+            logger.info("Tapped process exited: \(self.tappedProcessCache[id]?.name ?? id)")
+            tapManager.removeTap(processID: id)
+            processVolumes.removeValue(forKey: id)
+            tappedObjectIDs.removeValue(forKey: id)
+            tappedProcessCache.removeValue(forKey: id)
+            previousVolumes.removeValue(forKey: id)
         }
 
-        // Append still-alive muted processes that stopped outputting audio
-        for (id, cached) in mutedProcessCache {
+        // Append still-alive tapped processes that stopped outputting audio
+        for (id, cached) in tappedProcessCache {
             if !activeProcesses.contains(where: { $0.id == id }) {
                 var copy = cached
                 copy.isRunningOutput = false
@@ -192,7 +213,7 @@ final class AppListViewModel {
     }
 
     private func handleDeviceChange() {
-        guard anyMuted else { return }
+        guard anyAdjusted else { return }
 
         // Debounce rapid device switches (e.g. connecting AirPods)
         deviceChangeTask?.cancel()
@@ -200,30 +221,34 @@ final class AppListViewModel {
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled, let self else { return }
 
-            logger.info("Output device changed, recreating \(self.mutedProcessIDs.count) tap(s)")
+            logger.info("Output device changed, recreating \(self.processVolumes.count) tap(s)")
 
-            let saved = self.mutedObjectIDs
+            let savedObjectIDs = self.tappedObjectIDs
+            let savedVolumes = self.processVolumes
 
             self.tapManager.teardownAll()
 
             // Collect new state into locals, then assign once to avoid
             // a UI flicker where everything briefly appears unmuted.
-            var newMutedIDs: Set<String> = []
+            var newVolumes: [String: Float] = [:]
             var newObjectIDs: [String: [AudioObjectID]] = [:]
 
-            for (processID, objectIDs) in saved {
+            for (processID, objectIDs) in savedObjectIDs {
+                let volume = savedVolumes[processID] ?? 1.0
+                guard volume < 1.0 else { continue }
                 do {
-                    try self.tapManager.mute(processID: processID, objectIDs: objectIDs)
-                    newMutedIDs.insert(processID)
+                    try self.tapManager.setVolume(processID: processID, objectIDs: objectIDs, volume: Float32(volume))
+                    newVolumes[processID] = volume
                     newObjectIDs[processID] = objectIDs
                 } catch {
-                    logger.error("Re-mute failed for \(processID): \(error.localizedDescription)")
-                    self.mutedProcessCache.removeValue(forKey: processID)
+                    logger.error("Re-tap failed for \(processID): \(error.localizedDescription)")
+                    self.tappedProcessCache.removeValue(forKey: processID)
+                    self.previousVolumes.removeValue(forKey: processID)
                 }
             }
 
-            self.mutedProcessIDs = newMutedIDs
-            self.mutedObjectIDs = newObjectIDs
+            self.processVolumes = newVolumes
+            self.tappedObjectIDs = newObjectIDs
         }
     }
 }

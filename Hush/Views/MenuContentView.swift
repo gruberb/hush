@@ -25,14 +25,14 @@ struct MenuContentView: View {
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
             Spacer()
-            if viewModel.anyMuted {
-                Button("Unmute All") {
-                    viewModel.unmuteAll()
+            if viewModel.anyAdjusted {
+                Button("Reset All") {
+                    viewModel.resetAll()
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.blue)
                 .font(.caption)
-                .accessibilityLabel("Unmute all apps")
+                .accessibilityLabel("Reset all app volumes")
             }
         }
         .padding(.horizontal, 12)
@@ -63,10 +63,10 @@ struct MenuContentView: View {
                     ForEach(viewModel.processes) { process in
                         AudioProcessRow(
                             process: process,
-                            isMuted: viewModel.mutedProcessIDs.contains(process.id)
-                        ) {
-                            viewModel.toggleMute(for: process)
-                        }
+                            volume: viewModel.volume(for: process.id),
+                            onToggleMute: { viewModel.toggleMute(for: process) },
+                            onVolumeChange: { viewModel.setVolume(for: process, to: $0) }
+                        )
                     }
                 }
                 .padding(.vertical, 4)
