@@ -106,6 +106,38 @@ final class AudioTapManager {
             let inputList = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inInputData))
             let outputList = UnsafeMutableAudioBufferListPointer(outOutputData)
 
+            // The stereo-mixdown tap may deliver interleaved audio (1 buffer,
+            // mNumberChannels >= 2) while the output device expects deinterleaved
+            // buffers (one per channel). Detect this and deinterleave using a
+            // strided vDSP multiply so each channel is scaled and separated in
+            // one pass.
+            if inputList.count == 1, inputList[0].mNumberChannels >= 2, outputList.count >= 2,
+               let src = inputList[0].mData {
+                let srcPtr = src.assumingMemoryBound(to: Float32.self)
+                let channels = Int(inputList[0].mNumberChannels)
+                let frames = Int(inputList[0].mDataByteSize) / (MemoryLayout<Float32>.stride * channels)
+
+                for ch in 0..<outputList.count {
+                    guard let dst = outputList[ch].mData else { continue }
+                    let dstFrames = Int(outputList[ch].mDataByteSize) / MemoryLayout<Float32>.stride
+                    if ch < channels {
+                        let count = vDSP_Length(min(frames, dstFrames))
+                        let dstPtr = dst.assumingMemoryBound(to: Float32.self)
+                        vDSP_vsmul(srcPtr + ch, vDSP_Stride(channels), &vol, dstPtr, 1, count)
+                    }
+                    if ch >= channels || frames < dstFrames {
+                        // Zero any remaining or unmapped output samples.
+                        let filled = ch < channels ? min(frames, dstFrames) : 0
+                        let remain = Int(outputList[ch].mDataByteSize) - filled * MemoryLayout<Float32>.stride
+                        if remain > 0 {
+                            memset(dst.advanced(by: filled * MemoryLayout<Float32>.stride), 0, remain)
+                        }
+                    }
+                }
+                return
+            }
+
+            // Standard deinterleaved path (input and output buffer counts match).
             for i in 0..<outputList.count {
                 guard let dst = outputList[i].mData else { continue }
                 let dstBytes = Int(outputList[i].mDataByteSize)
@@ -116,6 +148,9 @@ final class AudioTapManager {
                     let srcPtr = src.assumingMemoryBound(to: Float32.self)
                     let dstPtr = dst.assumingMemoryBound(to: Float32.self)
                     vDSP_vsmul(srcPtr, 1, &vol, dstPtr, 1, vDSP_Length(count))
+                    if bytes < dstBytes {
+                        memset(dst.advanced(by: bytes), 0, dstBytes - bytes)
+                    }
                 } else {
                     memset(dst, 0, dstBytes)
                 }
